@@ -65,14 +65,23 @@
             },
             events: {
               onReady: function (event) {
+                // YouTube remembers mute per browser: one muted trailer would
+                // leave every later one silent on that TV. Start with sound.
+                event.target.unMute();
+                event.target.setVolume(100);
                 event.target.playVideo();
-                // Engines that block autoplay with sound still allow it muted.
+                // Engines that block autoplay with sound still allow it muted,
+                // but only fall back when the video never started: a slow TV
+                // is often still buffering at this point, and muting it then
+                // is what left trailers silent.
                 setTimeout(function () {
-                  if (!playing) {
+                  var state = player.getPlayerState();
+                  if (!playing && (state === -1 || state === YT.PlayerState.CUED)) {
                     player.mute();
                     player.playVideo();
+                    report("muted");
                   }
-                }, 2500);
+                }, 4000);
               },
               onStateChange: function (event) {
                 if (event.data === YT.PlayerState.PLAYING) {
