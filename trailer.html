@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta name="robots" content="noindex" />
+    <title>Trailer</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+      }
+      #player {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="player"></div>
+    <script>
+      // Player page for the TV apps' in-app trailers: trailer.html?v=<YouTube id>.
+      // YouTube refuses embeds from an installed app's file:// page (error 153,
+      // no referrer), so the apps load this HTTPS page in their overlay instead.
+      // It reports back to the app with postMessage. Plain ES5: the oldest TVs
+      // run Chrome 38.
+      (function () {
+        var match = /[?&]v=([\w-]{11})/.exec(location.search);
+        var playing = false;
+
+        function report(state, detail) {
+          if (window.parent !== window) {
+            window.parent.postMessage({ source: "streamx-trailer", state: state, detail: detail }, "*");
+          }
+        }
+
+        if (!match) {
+          report("error", "missing id");
+          return;
+        }
+
+        window.onYouTubeIframeAPIReady = function () {
+          var player = new YT.Player("player", {
+            videoId: match[1],
+            width: "100%",
+            height: "100%",
+            playerVars: {
+              autoplay: 1,
+              controls: 0,
+              rel: 0,
+              modestbranding: 1,
+              playsinline: 1,
+              iv_load_policy: 3,
+              fs: 0,
+              disablekb: 1,
+              origin: location.origin
+            },
+            events: {
+              onReady: function (event) {
+                event.target.playVideo();
+                // Engines that block autoplay with sound still allow it muted.
+                setTimeout(function () {
+                  if (!playing) {
+                    player.mute();
+                    player.playVideo();
+                  }
+                }, 2500);
+              },
+              onStateChange: function (event) {
+                if (event.data === YT.PlayerState.PLAYING) {
+                  playing = true;
+                  report("playing");
+                }
+                if (event.data === YT.PlayerState.ENDED) report("ended");
+              },
+              onError: function (event) {
+                report("error", event.data);
+              }
+            }
+          });
+        };
+
+        var script = document.createElement("script");
+        script.src = "https://www.youtube.com/iframe_api";
+        document.head.appendChild(script);
+      })();
+    </script>
+  </body>
+</html>
