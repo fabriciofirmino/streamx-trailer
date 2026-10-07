@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta name="robots" content="noindex" />
+    <title>Trailer</title>
+    <link rel="preconnect" href="https://www.youtube.com" />
+    <link rel="preconnect" href="https://i.ytimg.com" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+      }
+      iframe {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      // Player page for the TV apps' in-app trailers: trailer-v2.html?v=<YouTube id>.
+      // YouTube refuses embeds from an installed app's file:// page (error 153,
+      // no referrer), so the apps load this HTTPS page in their overlay instead.
+      // It reports back to the app with postMessage (same messages as trailer.html).
+      //
+      // Faster than trailer.html: the YouTube embed starts loading at once, as
+      // the page is read, instead of after YouTube's iframe_api script and the
+      // widget script it pulls in (two requests in a row on a slow TV). The
+      // player is driven with the embed's own postMessage protocol, the one the
+      // iframe_api uses underneath. Plain ES5: the oldest TVs run Chrome 38.
+      (function () {
+        var YT_ORIGIN = "https://www.youtube.com";
+        var match = /[?&]v=([\w-]{11})/.exec(location.search);
+        var state = -1;
+        var playing = false;
+        var ready = false;
+        var listen;
+
+        function report(name, detail) {
+          if (window.parent !== window) {
+            window.parent.postMessage({ source: "streamx-trailer", state: name, detail: detail }, "*");
+          }
+        }
+
+        if (!match) {
+          report("error", "missing id");
+          return;
+        }
+
+        var frame = document.createElement("iframe");
+        frame.setAttribute("allow", "autoplay; encrypted-media");
+        frame.setAttribute("tabindex", "-1");
+        frame.src =
+          YT_ORIGIN +
+          "/embed/" +
+          match[1] +
+          "?autoplay=1&controls=0&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3&fs=0&disablekb=1" +
+          "&enablejsapi=1&widgetid=1&origin=" +
+          encodeURIComponent(location.origin);
+        document.body.appendChild(frame);
+
+        function send(message) {
+          if (frame.contentWindow) frame.contentWindow.postMessage(JSON.stringify(message), YT_ORIGIN);
+        }
+
+        function command(func, args) {
+          send({ event: "command", func: func, args: args || [], id: 1, channel: "widget" });
+        }
+
+        function onState(next) {
+          state = next;
+          if (next === 1 && !playing) {
+            playing = true;
+            report("playing");
+          }
+          if (next === 0) report("ended");
+        }
+
+        function onReady() {
+          if (ready) return;
+          ready = true;
+          clearInterval(listen);
+          // YouTube remembers mute per browser: one muted trailer would leave
+          // every later one silent on that TV. Start with sound.
+          command("unMute");
+          command("setVolume", [100]);
+          command("playVideo");
+          // Engines that block autoplay with sound still allow it muted, but
+          // only fall back when the video never started: a slow TV is often
+          // still buffering at this point.
+          setTimeout(function () {
+            if (!playing && (state === -1 || state === 5)) {
+              command("mute");
+              command("playVideo");
+              report("muted");
+            }
+          }, 4000);
+        }
+
+        window.addEventListener("message", function (event) {
+          if (event.origin !== YT_ORIGIN || event.source !== frame.contentWindow) return;
+          var data;
+          try {
+            data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+          } catch (e) {
+            return;
+          }
+          if (!data || !data.event) return;
+          if (data.event === "onReady" || data.event === "initialDelivery") onReady();
+          if (data.event === "onStateChange") onState(Number(data.info));
+          if (data.event === "infoDelivery" && data.info && typeof data.info.playerState === "number") {
+            onReady();
+            onState(data.info.playerState);
+          }
+          if (data.event === "onError") report("error", data.info);
+        });
+
+        // The embed answers once it hears "listening"; it may not be up yet, so keep asking until it does.
+        function hello() {
+          send({ event: "listening", id: 1, channel: "widget" });
+        }
+        frame.onload = hello;
+        listen = setInterval(hello, 250);
+      })();
+    </script>
+  </body>
+</html>
